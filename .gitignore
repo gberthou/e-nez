@@ -1,0 +1,8 @@
+build/
+doc/
+tools/__pycache__/
+
+src/board_usb_descriptors.h
+src/board_usb_descriptors.c
+src/board_usb_endpoints.h
+src/board_usb_endpoints.c
