@@ -8,6 +8,7 @@
 #include "interrupt.h"
 #include "drivers/nvic.h"
 #include "drivers/usb.h"
+#include "drivers/usb_audio.h"
 #include "drivers/usb_cdc_acm.h"
 #include "drivers/usb_protocol.h"
 #include "util/strformat.h"
@@ -40,6 +41,7 @@ enum usb_device_control_state_e
     CONTROL_STATE_SET_ADDRESS = 4,
     CONTROL_STATE_SET_CONFIGURATION = 5,
     CONTROL_STATE_CDC_ACM_SET_LINE_CODING = 6,
+    CONTROL_STATE_AUDIO_SET_CS_SAM_FREQ = 7,
     CONTROL_STATE_SET_ENUM_BEGIN = CONTROL_STATE_SET_xxx_TX_ACK
 };
 
@@ -47,20 +49,43 @@ enum usb_device_control_state_e
 constexpr unsigned usb_endpoint_control = 0;
 constexpr unsigned usb_endpoint_cdc_notification = 1; // Configuration0.Interface0, EP1
 constexpr unsigned usb_endpoint_cdc_data = 2; // Configuration0.Interface1, EP2
+constexpr unsigned usb_endpoint_audio_stream = 3; // Configuration0.Interface3, EP3
 
 constexpr uint16_t usb_config0_cdc_acm_control_interface = 0;
+constexpr uint16_t usb_config0_audio_control_interface = 2;
+constexpr uint16_t usb_config0_audio_stream_interface = 3;
+
+constexpr uint16_t usb_audio_stream_alt_play = 1;
+
+// Cf. descriptor
+constexpr uint8_t usb_audio_clock_source_id = 1;
+constexpr uint8_t usb_audio_input_terminal_id = 2;
+constexpr uint8_t usb_audio_output_terminal_id = 3;
 
 constexpr unsigned nvic_usb = 8;
 constexpr size_t no_config = 0xffffffff;
+
+// Constants
+// Audio 2.0 layout 3 format
+static const uint8_t __attribute__((aligned(4))) usb_audio_clock_source_ranges[] = {
+    0x01, 0x00, // 1 range
+    0x80, 0xbb, 0x00, 0x00, // range 0 min = 48kHz
+    0x80, 0xbb, 0x00, 0x00, // range 0 max = 48kHz
+    0x00, 0x00, 0x00, 0x00, // range 0 step (mandatory for ranges of one element)
+};
+// Constant because the device only supports one
+static const uint32_t usb_audio_clock_source_current = 48000;
 
 // Variables
 
 static struct usb_device_endpoint_t endpoint_control;
 static struct usb_device_endpoint_t endpoint_cdc_notif;
 static struct usb_device_endpoint_t endpoint_cdc_data;
+static struct usb_device_endpoint_t endpoint_audio_stream;
 static struct usb_device_endpoint_t * const config0_endpoints[] = {
     &endpoint_cdc_notif,
-    &endpoint_cdc_data
+    &endpoint_cdc_data,
+    &endpoint_audio_stream
 };
 
 static bool is_suspended = false;
@@ -78,6 +103,9 @@ static char __attribute__((aligned(4))) cdc_acm_buffer[config0_ep2_tx_size];
 static size_t cdc_acm_current_tx_size = 0;
 static bool cdc_acm_wait_for_tx_ack = false;
 static size_t cdc_acm_tx_sof_timeout = 0; // To detect when to timeout a flush
+
+static bool audio_streaming_on = false;
+static volatile void *current_audio_app_buffer = NULL;
 
 // Utils
 #define MIN_UNSAFE(a, b) ((a) < (b) ? (a) : (b))
@@ -207,7 +235,19 @@ static inline enum usb_device_control_state_e handle_usb_setup(
                     break;
 
                 case UP_SETUP_RECIPIENT_INTERFACE:
-                    goto _handle_usb_setup_error;
+                {
+                    auto const interface_index = setup->index_offset & 0xfu;
+                    if (current_address == 0 && interface_index != 0)
+                        goto _handle_usb_setup_error;
+                    if (current_config != no_config
+                    && interface_index > usb_config0_audio_stream_interface)
+                    {
+                        goto _handle_usb_setup_error;
+                    }
+
+                    // Interface response is RES0
+                    break;
+                }
 
                 case UP_SETUP_RECIPIENT_ENDPOINT:
                 {
@@ -215,7 +255,10 @@ static inline enum usb_device_control_state_e handle_usb_setup(
                     if (current_address == 0 && endpoint_index != 0)
                         goto _handle_usb_setup_error;
                     if (current_config != no_config)
-                        goto _handle_usb_setup_error;
+                    {
+                        if (endpoint_index > usb_endpoint_audio_stream)
+                            goto _handle_usb_setup_error;
+                    }
                     // TODO: Support Halt=1 for STALL / SET_FEATURE(ENDPOINT_HALT)
                     break;
                 }
@@ -318,6 +361,40 @@ static inline enum usb_device_control_state_e handle_usb_setup(
             // Keep size_to_send as 0 to send a ZLP
             break;
 
+        case UP_SETUP_REQ_SET_INTERFACE:
+            if (setup->index_offset == usb_config0_audio_stream_interface)
+            {
+                auto const old_on = audio_streaming_on;
+                audio_streaming_on = (setup->value == usb_audio_stream_alt_play);
+                if (old_on != audio_streaming_on)
+                {
+                    // RM0490 29.5.5, STATTX/STATRX for isochronous endpoints may only
+                    // be DISABLED or VALID
+                    usb_set_device_endpoint_response(&endpoint_audio_stream,
+                        audio_streaming_on ? USB_EP_STATUSENC_VALID
+                            : USB_EP_STATUSENC_DISABLED,
+                        USB_EP_STATUSENC_DISABLED, // No RX
+                        false, false);
+                    *endpoint_audio_stream.layout.dbl_buf.ctrl0 =
+                        usb_make_tx_descriptor(config0_ep3_tx_pkt0,
+                            endpoint_audio_stream.tx_packet_size);
+                    *endpoint_audio_stream.layout.dbl_buf.ctrl1 =
+                        usb_make_tx_descriptor(config0_ep3_tx_pkt1,
+                            endpoint_audio_stream.tx_packet_size);
+                    current_audio_app_buffer = usb_endpoint_get_iso_buffer(
+                        &endpoint_audio_stream, true);
+                }
+
+                decision->last_packet = true;
+                next_state = CONTROL_STATE_SET_xxx_TX_ACK;
+            }
+            else
+            {
+                board_kprintformat("Unexp. SET_INTERFACE %d\r\n", setup->index_offset);
+                goto _handle_usb_setup_error;
+            }
+            break;
+
         default:
             board_kprintformat("Unexp. SETUP packet\r\n");
             goto _handle_usb_setup_error;
@@ -369,6 +446,87 @@ _handle_usb_cdc_acm_request_error:
 }
 
 // Returns next state
+static inline enum usb_device_control_state_e handle_usb_audio_request(
+    const struct up_setup_t *setup,
+    struct usb_decision_t *decision,
+    struct upload_info_t *upload)
+{
+    auto next_state = CONTROL_STATE_WAIT_TX_ACK;
+    const uint16_t entity_id = (setup->index_offset >> 8);
+    auto const is_cur = (setup->request == AUDIO_REQ_CUR);
+    auto const channel_number = (setup->value & 0xffu);
+    auto const control_selector = (setup->value >> 8);
+
+    decision->has_failed = true;
+    if (channel_number != 0)
+    {
+        board_kprintformat("Unsupp. Audio CN %d\r\n", channel_number);
+        goto _handle_usb_audio_request_error;
+    }
+
+    switch (entity_id)
+    {
+        case 0: // Device
+            board_kprintformat("Unexp. Audio Device\r\n");
+            goto _handle_usb_audio_request_error;
+
+        case usb_audio_clock_source_id:
+            if (control_selector > AUDIO_CS_CLOCK_VALID_CONTROL)
+            {
+                board_kprintformat("Unexp. Audio CS\r\n");
+                goto _handle_usb_audio_request_error;
+            }
+            if (setup->is_get && control_selector == AUDIO_CS_SAM_FREQ_CONTROL)
+            {
+                const void * ptr = is_cur ? (void*) &usb_audio_clock_source_current
+                    : (void*) usb_audio_clock_source_ranges;
+                auto const size = is_cur ? sizeof(usb_audio_clock_source_current)
+                    : sizeof(usb_audio_clock_source_ranges);
+                usb_prepare_packet(&endpoint_control, ptr,
+                    MIN_UNSAFE(size, setup->length),
+                    decision, upload);
+            }
+            else if (!setup->is_get && is_cur
+            && control_selector == AUDIO_CS_SAM_FREQ_CONTROL)
+            {
+                decision->has_failed = false;
+                decision->expect_data_payload = true;
+                next_state = CONTROL_STATE_AUDIO_SET_CS_SAM_FREQ;
+            }
+            else
+            {
+                board_kprintformat("Unsupp. Audio SET\r\n");
+                goto _handle_usb_audio_request_error;
+            }
+            break;
+
+        case usb_audio_input_terminal_id:
+        case usb_audio_output_terminal_id:
+            if (control_selector > AUDIO_TE_PHANTOM_POWER_CONTROL)
+            {
+                board_kprintformat("Unexp. Audio TE\r\n");
+                goto _handle_usb_audio_request_error;
+            }
+            else
+            {
+                board_kprintformat("Unsupp. Audio TE\r\n");
+                goto _handle_usb_audio_request_error;
+            }
+            break;
+
+        default:
+            board_kprintformat("Unexp. Audio EntityId %d\r\n", entity_id);
+            goto _handle_usb_audio_request_error;
+    }
+
+    decision->has_failed = false;
+    return next_state;
+
+_handle_usb_audio_request_error:
+    return CONTROL_STATE_IDLE;
+}
+
+// Returns next state
 static inline enum usb_device_control_state_e handle_usb_ep0(
     struct usb_decision_t *decision,
     struct upload_info_t *upload)
@@ -387,7 +545,13 @@ static inline enum usb_device_control_state_e handle_usb_ep0(
     memcpyv(&setup, ep0_rx_pkt, sizeof(setup));
     usb_endpoint_ack(&endpoint_control, false, true);
 
-    board_kprintformat("S %8b\r\n", &setup);
+    // In case of audio streaming start, printing would take too much time, compared to
+    // the 1ms cadence of full-speed isochronous transmission
+    if (!(setup.request == UP_SETUP_REQ_SET_INTERFACE
+    && setup.index_offset == usb_config0_audio_stream_interface))
+    {
+        board_kprintformat("S %8b\r\n", &setup);
+    }
 
     if (!up_verify_setup(&setup))
     {
@@ -408,6 +572,11 @@ static inline enum usb_device_control_state_e handle_usb_ep0(
                 case usb_config0_cdc_acm_control_interface:
                     if (usb_is_cdc_acm_request(&setup))
                         return handle_usb_cdc_acm_request(&setup, decision, upload);
+                    break;
+
+                case usb_config0_audio_control_interface:
+                    if (usb_is_audio_request(&setup))
+                        return handle_usb_audio_request(&setup, decision, upload);
                     break;
 
                 default:
@@ -491,6 +660,32 @@ static inline void board_usb_set_configuration(size_t configuration_index)
         *endpoint_cdc_data.layout.tx_rx.tx_ctrl = usb_make_tx_descriptor(config0_ep2_tx_pkt, 0);
         *endpoint_cdc_data.layout.tx_rx.rx_ctrl = usb_make_rx_descriptor(config0_ep2_rx_pkt,
             config0_ep2_rx_size);
+    }
+
+    // Endpoint 3 - Audio stream
+    {
+        // RM0490 29.5.5, STATTX/STATRX for isochronous endpoints may only
+        // be DISABLED or VALID
+        constexpr struct usb_device_endpoint_config_t endpoint_config = {
+            .address = usb_endpoint_audio_stream,
+            .type = USB_EP_TYPE_ISO, // Cf. configuration
+            .tx_status = USB_EP_STATUSENC_DISABLED, // No TX yet since alt0 has no
+                                                    // endpoint
+            .rx_status = USB_EP_STATUSENC_DISABLED // TX-only endpoint
+        };
+        usb_setup_device_endpoint(endpoint_config.address, &endpoint_config,
+            &endpoint_audio_stream);
+        // Since double-buffering is on for isochronous endpoints, RX is actually the
+        // "other" TX
+        endpoint_audio_stream.layout.dbl_buf.packet0 = config0_ep3_tx_pkt0;
+        endpoint_audio_stream.layout.dbl_buf.packet1 = config0_ep3_tx_pkt1;
+        endpoint_audio_stream.tx_packet_size = config0_ep3_tx_size - 8; // Jitter
+        *endpoint_audio_stream.layout.dbl_buf.ctrl0 = usb_make_tx_descriptor(
+            config0_ep3_tx_pkt0, 0);
+        *endpoint_audio_stream.layout.dbl_buf.ctrl1 = usb_make_tx_descriptor(
+            config0_ep3_tx_pkt1, 0);
+        current_audio_app_buffer = usb_endpoint_get_iso_buffer(
+            &endpoint_audio_stream, true);
     }
 }
 
@@ -702,6 +897,26 @@ void board_usb_handler(void)
                         break;
                     }
 
+                    case CONTROL_STATE_AUDIO_SET_CS_SAM_FREQ:
+                    {
+                        // Data size is 4, no more than one data packet is required
+                        auto const data_size = usb_rx_get_byte_count(
+                            *endpoint_control.layout.tx_rx.rx_ctrl);
+                        uint32_t requested_sampling_frequency = 0;
+                        memcpyv(&requested_sampling_frequency, ep0_rx_pkt,
+                            MIN_UNSAFE(data_size,
+                                sizeof(requested_sampling_frequency)));
+
+                        // Since the sampling frequency is constant for now, just reject
+                        // any different value
+                        if (requested_sampling_frequency !=
+                            usb_audio_clock_source_current)
+                        {
+                            goto _board_usb_handler_stall;
+                        }
+                        break;
+                    }
+
                     case CONTROL_STATE_WAIT_RX_ACK:
                         break;
 
@@ -742,6 +957,12 @@ void board_usb_handler(void)
                         USB_EP_STATUSENC_NAK, // Unused
                         false, true);
                     cdc_acm_wait_for_tx_ack = false;
+                }
+                else if (board_usb_audio_is_active()
+                && info.endpoint == usb_endpoint_audio_stream)
+                {
+                    current_audio_app_buffer = usb_endpoint_get_iso_buffer(
+                        &endpoint_audio_stream, true);
                 }
             }
             else if (endpoint_info.valid_rx)
@@ -793,6 +1014,16 @@ _board_usb_handler_stall:
 bool board_usb_cdc_acm_is_active(void)
 {
     return current_config == 0;
+}
+
+bool board_usb_audio_is_active(void)
+{
+    return current_config == 0 && audio_streaming_on;
+}
+
+volatile int32_t *board_usb_get_pcm_buffer(void)
+{
+    return current_audio_app_buffer;
 }
 
 static inline void board_usb_cdc_acm_flush(void)

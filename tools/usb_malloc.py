@@ -62,19 +62,25 @@ with open(basename + ".c", "w") as fc, \
             3) # 8B alignment
 
         known_address_direction = set()
-        for address, direction, packet_size in usb_desc.gen_endpoint_config(config_bytes):
+        for address, direction, etype, packet_size in usb_desc.gen_endpoint_config(config_bytes):
             if (address, direction) in known_address_direction:
                 raise RuntimeError("Endpoint " + str(address) + ("IN" if direction else "OUT") + " is referenced several times")
             known_address_direction.add((address, direction))
 
-            allocated_address = allocator.allocate(packet_size)
             name_prefix = "config" + str(config_index) + "_ep" + str(address) + "_" \
                 + ("tx" if direction else "rx")
             packet_constant_name = name_prefix + "_pkt"
             size_constant_name = name_prefix + "_size"
 
-            fc.write(pointer_to_str(packet_constant_name, allocated_address, True))
-            fh.write(pointer_to_str(packet_constant_name, allocated_address, False))
+            n_packets = (2 if etype == 0x1 else 1) # Isochronous has double-buffering
+            for packet in range(n_packets):
+                suffix = (str(packet) if n_packets > 1 else "")
+
+                allocated_address = allocator.allocate(packet_size)
+                fc.write(pointer_to_str(packet_constant_name + suffix, allocated_address,
+                    True))
+                fh.write(pointer_to_str(packet_constant_name + suffix, allocated_address,
+                    False))
             fh.write(size_to_h(size_constant_name, packet_size))
 
     fh.write("#endif // " + HEADER_GUARD)

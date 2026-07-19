@@ -132,6 +132,13 @@ struct usb_device_endpoint_info_t usb_get_device_endpoint_info(
 void usb_endpoint_ack(const struct usb_device_endpoint_t *endpoint, bool tx_ack,
     bool rx_ack);
 
+// Assume a double-buffered isochronous endpoint.
+// Return buffer under an application-centered perspective: when DTOG* is cleared,
+// hardware is using the "normal" buffer so application must use the alternate buffer
+// and vice-versa.
+volatile void *usb_endpoint_get_iso_buffer(const struct usb_device_endpoint_t *endpoint,
+    bool is_tx);
+
 void usb_get_interrupt_info(struct usb_interrupt_info_t *info);
 
 // Utils

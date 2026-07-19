@@ -2,9 +2,12 @@
 #define BOARD_USB_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 void board_usb_init_ep0(void);
 bool board_usb_cdc_acm_is_active(void);
+bool board_usb_audio_is_active(void);
+volatile int32_t *board_usb_get_pcm_buffer(void);
 
 // Assumes board_usb_cdc_acm_is_active() == true.
 // Warning: blocking call when it's the call that triggers the flush condition. This

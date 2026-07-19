@@ -118,6 +118,9 @@ void usb_setup_device_endpoint(
     auto const is_bulk_double_buf = (type == USB_EP_TYPE_BULK_DBL_BUF);
     auto const is_control = (type == USB_EP_TYPE_CONTROL || type == USB_EP_TYPE_CONTROL_STATUS_OUT);
 
+    // The DTOG* bits matter for isochronous endpoints with EPKIND=0, however the
+    // application doesn't need full configurability of the initial state if it assumes
+    // that the initial values are 0 (guaranteed by this function)
     const uint32_t dtogtx = (is_bulk_double_buf || is_control ? 1: 0);
     const uint32_t dtogrx = 0;
 
@@ -219,6 +222,18 @@ void usb_endpoint_ack(const struct usb_device_endpoint_t *endpoint, bool tx_ack,
     chepr &= preserve_mask;
     chepr |= w0_mask;
     *chepr_ptr = chepr;
+}
+
+volatile void *usb_endpoint_get_iso_buffer(const struct usb_device_endpoint_t *endpoint,
+    bool is_tx)
+{
+    auto const chepr = usb->chepr[endpoint->index];
+
+    // Select DTGOTX or DTGORX
+    const size_t shift = (is_tx ? 6 : 14);
+    if (chepr & (0x1u << shift))
+        return endpoint->layout.dbl_buf.packet0;
+    return endpoint->layout.dbl_buf.packet1;
 }
 
 void usb_get_interrupt_info(struct usb_interrupt_info_t *info)

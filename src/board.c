@@ -186,3 +186,13 @@ void board_set_led(unsigned index, bool on)
     gpio_out(led_port, index == 0 ? led0 : led1, !on); // LEDs have reverse polarity
 #endif
 }
+
+bool board_audio_is_active(void)
+{
+    return board_usb_audio_is_active();
+}
+
+volatile int32_t *board_audio_get_pcm_buffer(void)
+{
+    return board_usb_get_pcm_buffer();
+}
