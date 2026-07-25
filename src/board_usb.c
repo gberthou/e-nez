@@ -47,13 +47,20 @@ enum usb_device_control_state_e
 
 // Defines
 constexpr unsigned usb_endpoint_control = 0;
+#ifdef HAS_CDC_ACM
 constexpr unsigned usb_endpoint_cdc_notification = 1; // Configuration0.Interface0, EP1
+#endif // HAS_CDC_ACM
 constexpr unsigned usb_endpoint_cdc_data = 2; // Configuration0.Interface1, EP2
 constexpr unsigned usb_endpoint_audio_stream = 3; // Configuration0.Interface3, EP3
 
+#ifdef HAS_CDC_ACM
 constexpr uint16_t usb_config0_cdc_acm_control_interface = 0;
 constexpr uint16_t usb_config0_audio_control_interface = 2;
 constexpr uint16_t usb_config0_audio_stream_interface = 3;
+#else
+constexpr uint16_t usb_config0_audio_control_interface = 0;
+constexpr uint16_t usb_config0_audio_stream_interface = 1;
+#endif // HAS_CDC_ACM
 
 constexpr uint16_t usb_audio_stream_alt_play = 1;
 
@@ -99,8 +106,10 @@ static_assert(sizeof(nonconst_response_data) >= 2); // Largest response: GET_STA
 
 // Default is 115200 baud, 1 stop bit, no parity, 8 data bits
 static uint32_t cdc_acm_line_coding[2] = {0x0001c200, 0x00080000};
+#ifdef HAS_CDC_ACM
 static char __attribute__((aligned(4))) cdc_acm_buffer[config0_ep2_tx_size];
 static size_t cdc_acm_current_tx_size = 0;
+#endif // HAS_CDC_ACM
 static bool cdc_acm_wait_for_tx_ack = false;
 static size_t cdc_acm_tx_sof_timeout = 0; // To detect when to timeout a flush
 
@@ -256,8 +265,15 @@ static inline enum usb_device_control_state_e handle_usb_setup(
                         goto _handle_usb_setup_error;
                     if (current_config != no_config)
                     {
-                        if (endpoint_index > usb_endpoint_audio_stream)
+                        if (endpoint_index > usb_endpoint_audio_stream
+#ifndef HAS_CDC_ACM
+                        || (endpoint_index != 0
+                            && endpoint_index != usb_endpoint_audio_stream)
+#endif // !HAS_CDC_ACM
+                        )
+                        {
                             goto _handle_usb_setup_error;
+                        }
                     }
                     // TODO: Support Halt=1 for STALL / SET_FEATURE(ENDPOINT_HALT)
                     break;
@@ -569,10 +585,12 @@ static inline enum usb_device_control_state_e handle_usb_ep0(
         {
             switch (setup.index_offset & 0xfu)
             {
+#ifdef HAS_CDC_ACM
                 case usb_config0_cdc_acm_control_interface:
                     if (usb_is_cdc_acm_request(&setup))
                         return handle_usb_cdc_acm_request(&setup, decision, upload);
                     break;
+#endif // HAS_CDC_ACM
 
                 case usb_config0_audio_control_interface:
                     if (usb_is_audio_request(&setup))
@@ -627,6 +645,7 @@ static inline void board_usb_set_configuration(size_t configuration_index)
 
     // Endpoint 0 - Setup + CDC ACM control; already configured
     // Endpoint 1 - CDC ACM notification
+#ifdef HAS_CDC_ACM
     {
         constexpr struct usb_device_endpoint_config_t endpoint_config = {
             .address = usb_endpoint_cdc_notification,
@@ -661,6 +680,7 @@ static inline void board_usb_set_configuration(size_t configuration_index)
         *endpoint_cdc_data.layout.tx_rx.rx_ctrl = usb_make_rx_descriptor(config0_ep2_rx_pkt,
             config0_ep2_rx_size);
     }
+#endif // HAS_CDC_ACM
 
     // Endpoint 3 - Audio stream
     {
@@ -1028,6 +1048,7 @@ volatile int32_t *board_usb_get_pcm_buffer(void)
 
 static inline void board_usb_cdc_acm_flush(void)
 {
+#ifdef HAS_CDC_ACM
     if (cdc_acm_current_tx_size == 0)
         return;
 
@@ -1068,11 +1089,16 @@ static inline void board_usb_cdc_acm_flush(void)
         __asm__("wfi");
 
     usb_deactivate_interrupts(interrupt_mask);
+#endif // HAS_CDC_ACM
 }
 
 void board_usb_cdc_acm_putc(char c)
 {
+#ifdef HAS_CDC_ACM
     cdc_acm_buffer[cdc_acm_current_tx_size++] = c;
     if (c == '\n' || cdc_acm_current_tx_size >= sizeof(cdc_acm_buffer))
         board_usb_cdc_acm_flush();
+#else
+    (void) c;
+#endif // HAS_CDC_ACM
 }

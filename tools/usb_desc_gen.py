@@ -57,8 +57,8 @@ with open(basename + ".c", "w") as f_c, \
         f_c.write(to_c(name, descriptor.to_bytes(), True))
     f_c.write(generate_string_index("board_usb_string_descriptors", string_names))
 
-    header_body = \
-        to_h("uint8_t", "board_usb_device_descriptor", len(usb_desc.device.to_bytes())) \
+    header_body = ("#define HAS_CDC_ACM\n" if usb_desc.HAS_CDC_ACM else "") \
+        + to_h("uint8_t", "board_usb_device_descriptor", len(usb_desc.device.to_bytes())) \
         + to_h("uint8_t", "board_usb_configuration0_descriptor", len(usb_desc.assembled_config0)) \
         + to_h("const uint8_t *", "board_usb_string_descriptors", len(string_names))
     f_h.write(header("BOARD_USB_DESCRIPTORS_H", header_body.split("\n")))

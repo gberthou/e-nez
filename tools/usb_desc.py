@@ -1,6 +1,8 @@
 from dataclasses import dataclass, astuple
 import struct
 
+HAS_CDC_ACM = True
+
 #### Base
 # https://www.beyondlogic.org/usbnutshell/usb5.shtml#DeviceDescriptors
 @dataclass
@@ -349,7 +351,8 @@ config0 = ConfigurationDescriptor(
     bLength=0,
     bDescriptorType=0,
     wTotalLength=0,
-    bNumInterfaces=4, # CDC ACM control, CDC ACM data, Audio control, Audio stream
+    bNumInterfaces=2 + (2 if HAS_CDC_ACM else 0), # CDC ACM control, CDC ACM data
+                                                  # Audio control, Audio stream
     bConfigurationValue=1,
     iConfiguration=4, # String descriptor number
     bmAttributes=0x80, # D7=RES1
@@ -444,7 +447,7 @@ config0_interface1_endpoint1 = EndpointDescriptor(
 config0_iad_audio = InterfaceAssociationDescriptor(
     bLength=0,
     bDescriptorType=0,
-    bFirstInterface=2,
+    bFirstInterface=(2 if HAS_CDC_ACM else 0),
     bInterfaceCount=2, # AC + AS
     bFunctionClass=0x1, # Audio
     bFunctionSubClass=0x0,
@@ -454,7 +457,7 @@ config0_iad_audio = InterfaceAssociationDescriptor(
 config0_interface2 = InterfaceDescriptor(
     bLength=0,
     bDescriptorType=0,
-    bInterfaceNumber=2,
+    bInterfaceNumber=0 + (2 if HAS_CDC_ACM else 0),
     bAlternateSetting=0,
     bNumEndpoints=0, # 0 or 1 if optional interrupt endpoint is present
     bInterfaceClass=0x1, # Audio
@@ -528,7 +531,7 @@ config0_audio_output_terminal = AudioOutputTerminalDescriptor(
 config0_interface3_alt0 = InterfaceDescriptor( # Audio AS, alt 0 (no endpoint)
     bLength=0,
     bDescriptorType=0,
-    bInterfaceNumber=3,
+    bInterfaceNumber=1 + (2 if HAS_CDC_ACM else 0),
     bAlternateSetting=0,
     bNumEndpoints=0,
     bInterfaceClass=0x1, # Audio
@@ -539,7 +542,7 @@ config0_interface3_alt0 = InterfaceDescriptor( # Audio AS, alt 0 (no endpoint)
 config0_interface3_alt1 = InterfaceDescriptor( # Audio AS, alt 1
     bLength=0,
     bDescriptorType=0,
-    bInterfaceNumber=3,
+    bInterfaceNumber=1 + (2 if HAS_CDC_ACM else 0),
     bAlternateSetting=1,
     bNumEndpoints=1,
     bInterfaceClass=0x1, # Audio
@@ -649,9 +652,9 @@ assembled_audio_ac = assemble_audio_ac_descriptor(
     ]
 )
 
-assembled_config0 = assemble_configuration_descriptor(
-    config0,
-    [
+config0_descriptors = list()
+if HAS_CDC_ACM:
+    config0_descriptors += [
          config0_iad_cdc_acm,
          config0_interface0,
          config0_cdc_header_functional, config0_cdc_union_interface_functional,
@@ -659,12 +662,15 @@ assembled_config0 = assemble_configuration_descriptor(
          config0_interface0_endpoint0,
          config0_interface1, config0_interface1_endpoint0,
             config0_interface1_endpoint1,
-         config0_iad_audio,
-         config0_interface2,
-         assembled_audio_ac,
-         config0_interface3_alt0,
-         config0_interface3_alt1,
-         config0_audio_ac, config0_audio_typeI,
-         config0_interface3_endpoint0, config0_interface3_endpoint0_as
     ]
-)
+config0_descriptors += [
+     config0_iad_audio,
+     config0_interface2,
+     assembled_audio_ac,
+     config0_interface3_alt0,
+     config0_interface3_alt1,
+     config0_audio_ac, config0_audio_typeI,
+     config0_interface3_endpoint0, config0_interface3_endpoint0_as
+]
+
+assembled_config0 = assemble_configuration_descriptor(config0, config0_descriptors)
