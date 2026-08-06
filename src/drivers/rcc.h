@@ -38,7 +38,11 @@ enum rcc_clock_e
     RCC_CK_APB_TIM15 = 32 + 16,
     RCC_CK_APB_TIM16 = 32 + 17,
     RCC_CK_APB_TIM17 = 32 + 18,
-    RCC_CK_APB_ADC = 32 + 20
+    RCC_CK_APB_ADC = 32 + 20,
+
+    RCC_CK_AHB_DMA_DMAMUX = 64 + 0,
+    RCC_CK_AHB_FLASH = 64 + 8,
+    RCC_CK_AHB_CRC = 64 + 12
 };
 
 void rcc_select_sysclk_source(); // TODO: argument

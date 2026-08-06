@@ -48,6 +48,8 @@ void rcc_set_clock(enum rcc_clock_e clock, bool activate)
     volatile uint32_t * ptr;
     if (index == 1) // APB2
         ptr = &rcc->apbenr2;
+    else if (index == 2) // AHB
+        ptr = &rcc->ahbenr;
     else // APB1
         ptr = &rcc->apbenr1;
 
