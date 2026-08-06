@@ -7,6 +7,7 @@
 #include "board_usb_endpoints.h"
 #include "interrupt.h"
 #include "drivers/nvic.h"
+#include "drivers/spi.h"
 #include "drivers/usb.h"
 #include "drivers/usb_audio.h"
 #include "drivers/usb_cdc_acm.h"
@@ -116,7 +117,6 @@ static bool cdc_acm_wait_for_tx_ack = false;
 static size_t cdc_acm_tx_sof_timeout = 0; // To detect when to timeout a flush
 
 static bool audio_streaming_on = false;
-static volatile void *current_audio_app_buffer = NULL;
 
 // Utils
 #define MIN_UNSAFE(a, b) ((a) < (b) ? (a) : (b))
@@ -393,14 +393,18 @@ static inline enum usb_device_control_state_e handle_usb_setup(
                             : USB_EP_STATUSENC_DISABLED,
                         USB_EP_STATUSENC_DISABLED, // No RX
                         false, false);
+
+                    if (audio_streaming_on)
+                        board_start_sampling();
+                    else
+                        board_stop_sampling();
+
                     *endpoint_audio_stream.layout.dbl_buf.ctrl0 =
                         usb_make_tx_descriptor(config0_ep3_tx_pkt0,
                             endpoint_audio_stream.tx_packet_size);
                     *endpoint_audio_stream.layout.dbl_buf.ctrl1 =
                         usb_make_tx_descriptor(config0_ep3_tx_pkt1,
                             endpoint_audio_stream.tx_packet_size);
-                    current_audio_app_buffer = usb_endpoint_get_iso_buffer(
-                        &endpoint_audio_stream, true);
                 }
 
                 decision->last_packet = true;
@@ -706,8 +710,6 @@ static inline void board_usb_set_configuration(size_t configuration_index)
             config0_ep3_tx_pkt0, 0);
         *endpoint_audio_stream.layout.dbl_buf.ctrl1 = usb_make_tx_descriptor(
             config0_ep3_tx_pkt1, 0);
-        current_audio_app_buffer = usb_endpoint_get_iso_buffer(
-            &endpoint_audio_stream, true);
     }
 }
 
@@ -983,8 +985,23 @@ void board_usb_handler(void)
                 else if (board_usb_audio_is_active()
                 && info.endpoint == usb_endpoint_audio_stream)
                 {
-                    current_audio_app_buffer = usb_endpoint_get_iso_buffer(
-                        &endpoint_audio_stream, true);
+                    volatile void * const new_buffer =
+                        usb_endpoint_get_iso_buffer(&endpoint_audio_stream, true);
+                    auto const actual_buffer_size =
+                        board_on_audio_buffers_swapped(new_buffer);
+
+                    if (new_buffer == config0_ep3_tx_pkt0)
+                    {
+                        *endpoint_audio_stream.layout.dbl_buf.ctrl0 =
+                            usb_make_tx_descriptor(config0_ep3_tx_pkt0,
+                                actual_buffer_size);
+                    }
+                    else
+                    {
+                        *endpoint_audio_stream.layout.dbl_buf.ctrl1 =
+                            usb_make_tx_descriptor(config0_ep3_tx_pkt1,
+                                actual_buffer_size);
+                    }
                 }
             }
             else if (endpoint_info.valid_rx)
@@ -1041,11 +1058,6 @@ bool board_usb_cdc_acm_is_active(void)
 bool board_usb_audio_is_active(void)
 {
     return current_config == 0 && audio_streaming_on;
-}
-
-volatile int32_t *board_usb_get_pcm_buffer(void)
-{
-    return current_audio_app_buffer;
 }
 
 static inline void board_usb_cdc_acm_flush(void)
