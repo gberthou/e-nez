@@ -43,12 +43,19 @@ void rcc_select_sysclk_source()
 
 void rcc_set_clock(enum rcc_clock_e clock, bool activate)
 {
-    // TODO: Other buses than APB1
-    const uint32_t mask = (0x1u << clock);
+    const unsigned index = clock >> 5;
+
+    volatile uint32_t * ptr;
+    if (index == 1) // APB2
+        ptr = &rcc->apbenr2;
+    else // APB1
+        ptr = &rcc->apbenr1;
+
+    const uint32_t mask = (0x1u << (clock & 0x1fu));
     if (activate)
-        rcc->apbenr1 |= mask;
+        *ptr |= mask;
     else
-        rcc->apbenr1 &= ~mask;
+        *ptr &= ~mask;
 }
 
 void rcc_io_set(enum rcc_io_e io, bool activate)

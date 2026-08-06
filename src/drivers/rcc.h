@@ -28,7 +28,17 @@ enum rcc_clock_e
     RCC_CK_APB_I2C1 = 21,
     RCC_CK_APB_I2C2 = 22,
     RCC_CK_APB_DBG = 27,
-    RCC_CK_APB_PWR = 28
+    RCC_CK_APB_PWR = 28,
+
+    RCC_CK_APB_SYSCFG = 32 + 0,
+    RCC_CK_APB_TIM1 = 32 + 11,
+    RCC_CK_APB_SPI1 = 32 + 12,
+    RCC_CK_APB_USART1 = 32 + 14,
+    RCC_CK_APB_TIM14 = 32 + 15,
+    RCC_CK_APB_TIM15 = 32 + 16,
+    RCC_CK_APB_TIM16 = 32 + 17,
+    RCC_CK_APB_TIM17 = 32 + 18,
+    RCC_CK_APB_ADC = 32 + 20
 };
 
 void rcc_select_sysclk_source(); // TODO: argument
