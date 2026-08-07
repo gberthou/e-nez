@@ -58,6 +58,8 @@ with open(basename + ".c", "w") as f_c, \
     f_c.write(generate_string_index("board_usb_string_descriptors", string_names))
 
     header_body = ("#define HAS_CDC_ACM\n" if usb_desc.HAS_CDC_ACM else "") \
+        + "#define AUDIO_SAMPLING_FREQUENCY_HZ " \
+        + str(usb_desc.AUDIO_SAMPLING_FREQUENCY_HZ) + "\n" \
         + to_h("uint8_t", "board_usb_device_descriptor", len(usb_desc.device.to_bytes())) \
         + to_h("uint8_t", "board_usb_configuration0_descriptor", len(usb_desc.assembled_config0)) \
         + to_h("const uint8_t *", "board_usb_string_descriptors", len(string_names))

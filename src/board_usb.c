@@ -76,12 +76,14 @@ constexpr size_t no_config = 0xffffffff;
 // Audio 2.0 layout 3 format
 static const uint8_t __attribute__((aligned(4))) usb_audio_clock_source_ranges[] = {
     0x01, 0x00, // 1 range
-    0x80, 0xbb, 0x00, 0x00, // range 0 min = 48kHz
-    0x80, 0xbb, 0x00, 0x00, // range 0 max = 48kHz
+    AUDIO_SAMPLING_FREQUENCY_HZ & 0xff, (AUDIO_SAMPLING_FREQUENCY_HZ >> 8) & 0xff,
+    AUDIO_SAMPLING_FREQUENCY_HZ >> 16, 0x00, // range 0 min
+    AUDIO_SAMPLING_FREQUENCY_HZ & 0xff, (AUDIO_SAMPLING_FREQUENCY_HZ >> 8) & 0xff,
+    AUDIO_SAMPLING_FREQUENCY_HZ >> 16, 0x00, // range 0 max = range 0 min
     0x00, 0x00, 0x00, 0x00, // range 0 step (mandatory for ranges of one element)
 };
 // Constant because the device only supports one
-static const uint32_t usb_audio_clock_source_current = 48000;
+static const uint32_t usb_audio_clock_source_current = AUDIO_SAMPLING_FREQUENCY_HZ;
 
 // Variables
 

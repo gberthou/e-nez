@@ -2,6 +2,7 @@ from dataclasses import dataclass, astuple
 import struct
 
 HAS_CDC_ACM = True
+AUDIO_SAMPLING_FREQUENCY_HZ = 48000
 
 #### Base
 # https://www.beyondlogic.org/usbnutshell/usb5.shtml#DeviceDescriptors
@@ -577,14 +578,17 @@ config0_audio_typeI = AudioTypeIDescriptor(
     bBitResolution=32 # 32b (full frame), TODO review
 )
 # https://github.com/MicrosoftDocs/windows-driver-docs/blob/staging/windows-driver-docs-pr/audio/usb-2-0-audio-drivers.md
+n_bytes_per_frame = 8 # 2 channels * 32b
+# Amount of frames per millisecond (SOF)
+n_frames = AUDIO_SAMPLING_FREQUENCY_HZ // 1000 + 1 # Add ceiling + jitter frame,
+# according to usbaudio2 for FMT 2.0 Section 2.3.3.1
+
 config0_interface3_endpoint0 = EndpointDescriptor(
     bLength=0,
     bDescriptorType=0,
     bEndpointAddress=0x83, # IN, address=3
     bmAttributes=0x05, # Isochronous endpoint; asynchronous; data EP
-    wMaxPacketSize=384+8, # 48 kHz * 1ms (SOF) * 2 channels * 32b
-                          # + 1 frame of jitter (2 channels * 32b) according to usbaudio2
-                          # for FMT 2.0 Section 2.3.3.1
+    wMaxPacketSize=n_bytes_per_frame * n_frames,
     bInterval=1
 )
 
