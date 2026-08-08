@@ -1,8 +1,8 @@
 from dataclasses import dataclass, astuple
 import struct
 
-HAS_CDC_ACM = True
-AUDIO_SAMPLING_FREQUENCY_HZ = 48000
+HAS_CDC_ACM = False
+AUDIO_SAMPLING_FREQUENCY_HZ = 44100
 
 #### Base
 # https://www.beyondlogic.org/usbnutshell/usb5.shtml#DeviceDescriptors
@@ -574,8 +574,8 @@ config0_audio_typeI = AudioTypeIDescriptor(
     bDescriptorType=0,
     bDescriptorSubtype=0,
     bFormatType=0,
-    bSubslotSize=4, # 32b, TODO review
-    bBitResolution=32 # 32b (full frame), TODO review
+    bSubslotSize=4, # 32b
+    bBitResolution=24 # 24b
 )
 # https://github.com/MicrosoftDocs/windows-driver-docs/blob/staging/windows-driver-docs-pr/audio/usb-2-0-audio-drivers.md
 n_bytes_per_frame = 8 # 2 channels * 32b

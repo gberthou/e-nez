@@ -5,10 +5,10 @@
 #define NUCLEO64
 
 // Uncomment to duplicate left channel into right channel
-//#define MONO_TO_STEREO
+#define MONO_TO_STEREO
 
 // Uncomment for the USB audio to stream PCM24 data to the host instead of PCM32. This
 // assumes that the I2S device outputs 24b data as well (commented out = PCM32)
-//#define PCM24
+#define PCM24
 
 #endif // BOARD_CONFIG_H

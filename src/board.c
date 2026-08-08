@@ -217,8 +217,8 @@ void board_init(void)
     gpio_select_alternate_function(i2s_port, i2s_bck, 0);
     gpio_select_alternate_function(i2s_port, i2s_sd, 0);
 
-    auto const actual_sampling_frequency = i2s_init(I2S_CFG_SUP_RX, I2S_STD_PCM_SHORT,
-        32, 32, 48000000, AUDIO_SAMPLING_FREQUENCY_HZ, false, false);
+    auto const actual_sampling_frequency = i2s_init(I2S_CFG_SUP_RX, I2S_STD_PHILIPS,
+        32, 24, 48000000, AUDIO_SAMPLING_FREQUENCY_HZ, false, false);
     board_kprintformat("I2S sampling at %d Hz\r\n", actual_sampling_frequency);
 
     board_set_led(0, false);
